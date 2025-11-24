@@ -53,6 +53,9 @@ class SmartMeterLogger:
         self.reader = None
         self.data_queue = queue.Queue(50)
 
+        # Data aggregation buffer
+        self.current_data = {}
+
     def _load_config(self, config_path: str) -> Dict[str, Any]:
         """設定ファイルを読み込む"""
         with open(config_path, 'r', encoding='utf-8') as f:
@@ -172,16 +175,28 @@ class SmartMeterLogger:
         csv_file = self._get_csv_filepath()
         file_exists = csv_file.exists()
 
+        # 固定されたフィールド名（すべての可能なカラム）
+        fieldnames = [
+            'timestamp',
+            'instant_power_w',
+            'energy_total_kwh',
+            'energy_reverse_kwh',
+            'coefficient',
+            'unit',
+            'effective_digits',
+            'instant_current_r',
+            'instant_current_t'
+        ]
+
         try:
             with open(csv_file, 'a', newline='', encoding='utf-8') as f:
-                fieldnames = ['timestamp'] + list(data.keys())
-                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
 
                 # ヘッダーを書き込み（ファイルが新規の場合）
                 if not file_exists:
                     writer.writeheader()
 
-                # データ行を書き込み
+                # データ行を書き込み（欠損値は空）
                 row = {'timestamp': datetime.now().isoformat()}
                 row.update(data)
                 writer.writerow(row)
