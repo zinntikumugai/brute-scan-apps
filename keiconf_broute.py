@@ -34,9 +34,8 @@ def create_broute_reader(broute_id: str, broute_password: str, serial_port: str,
 
     # WiSunRL7023デバイスを初期化（RL7023 Stick-D/IPS用）
     wisundev = WiSunRL7023(
-        dev=serial_port,
+        port=serial_port,
         baud=baudrate,
-        timeout=timeout,
         type=WiSunRL7023.IPS  # RL7023 Stick-D/IPS用の指定
     )
 
