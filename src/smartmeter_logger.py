@@ -9,6 +9,7 @@ import time
 import csv
 import logging
 import queue
+import signal
 from datetime import datetime
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
@@ -56,6 +57,9 @@ class SmartMeterLogger:
         # Unit ID for tagging
         self.unit_id = self.config.get('unit_id', 'smartmeter01')
 
+        # Shutdown flag for signal handling
+        self.shutdown_requested = False
+
     def _load_config(self, config_path: str) -> Dict[str, Any]:
         """設定ファイルを読み込む"""
         with open(config_path, 'r', encoding='utf-8') as f:
@@ -82,32 +86,49 @@ class SmartMeterLogger:
     def _setup_logger(self) -> logging.Logger:
         """ロガーをセットアップ"""
         logger = logging.getLogger('smartmeter_logger')
-        logger.setLevel(getattr(logging, self.config['logging']['level']))
 
-        # ログディレクトリを作成
-        log_file = Path(self.config['logging']['file'])
-        log_file.parent.mkdir(parents=True, exist_ok=True)
+        # DEBUG環境変数でデバッグモードを判定（keilog互換）
+        debug_mode = os.getenv('DEBUG', '0') not in ('0', '', 'false', 'False')
 
-        # ファイルハンドラー（ローテーション）
-        file_handler = RotatingFileHandler(
-            log_file,
-            maxBytes=self.config['logging']['max_bytes'],
-            backupCount=self.config['logging']['backup_count']
-        )
-        file_handler.setLevel(logging.DEBUG)
-        file_formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-        )
-        file_handler.setFormatter(file_formatter)
+        if debug_mode:
+            # デバッグモード: 全てコンソールに出力
+            logger.setLevel(logging.DEBUG)
+            console_handler = logging.StreamHandler()
+            console_handler.setLevel(logging.DEBUG)
+            console_formatter = logging.Formatter(
+                '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+            )
+            console_handler.setFormatter(console_formatter)
+            logger.addHandler(console_handler)
+            logger.info("デバッグモード有効 (DEBUG環境変数)")
+        else:
+            # 通常モード: 設定ファイルに従う
+            logger.setLevel(getattr(logging, self.config['logging']['level']))
 
-        # コンソールハンドラー（エラーのみ）
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.ERROR)
-        console_formatter = logging.Formatter('%(levelname)s: %(message)s')
-        console_handler.setFormatter(console_formatter)
+            # ログディレクトリを作成
+            log_file = Path(self.config['logging']['file'])
+            log_file.parent.mkdir(parents=True, exist_ok=True)
 
-        logger.addHandler(file_handler)
-        logger.addHandler(console_handler)
+            # ファイルハンドラー（ローテーション）
+            file_handler = RotatingFileHandler(
+                log_file,
+                maxBytes=self.config['logging']['max_bytes'],
+                backupCount=self.config['logging']['backup_count']
+            )
+            file_handler.setLevel(logging.DEBUG)
+            file_formatter = logging.Formatter(
+                '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+            )
+            file_handler.setFormatter(file_formatter)
+
+            # コンソールハンドラー（INFOレベル以上）
+            console_handler = logging.StreamHandler()
+            console_handler.setLevel(logging.INFO)
+            console_formatter = logging.Formatter('%(levelname)s: %(message)s')
+            console_handler.setFormatter(console_formatter)
+
+            logger.addHandler(file_handler)
+            logger.addHandler(console_handler)
 
         return logger
 
@@ -270,9 +291,30 @@ class SmartMeterLogger:
             self.logger.error(f"データ解析エラー: {e}, data={queue_data}")
             return None
 
+    def _signal_handler(self, signum, frame):
+        """シグナルハンドラー（SIGTERM/SIGINTを処理）"""
+        sig_name = signal.Signals(signum).name
+        self.logger.info(f"{sig_name}シグナル受信 - グレースフルシャットダウン開始")
+        self.shutdown_requested = True
+
+    def _toggle_loglevel(self, signum, frame):
+        """SIGUSR1シグナルでログレベルを動的に切り替え（keilog互換）"""
+        current_level = self.logger.getEffectiveLevel()
+        if current_level == logging.DEBUG:
+            self.logger.info("ログレベルをINFOに変更")
+            self.logger.setLevel(logging.INFO)
+        else:
+            self.logger.info("ログレベルをDEBUGに変更")
+            self.logger.setLevel(logging.DEBUG)
+
     def run(self) -> None:
         """メインループ"""
         self.logger.info("スマートメーターロガー起動")
+
+        # シグナルハンドラーを設定
+        signal.signal(signal.SIGTERM, self._signal_handler)  # Docker stop
+        signal.signal(signal.SIGINT, self._signal_handler)   # Ctrl+C
+        signal.signal(signal.SIGUSR1, self._toggle_loglevel) # ログレベル切り替え
 
         # InfluxDBを初期化（有効な場合）
         self._init_influxdb()
@@ -285,12 +327,13 @@ class SmartMeterLogger:
         self.logger.info("データ取得開始")
 
         try:
-            while True:
+            while not self.shutdown_requested:
                 try:
                     # Queueからデータを取得（タイムアウト付き）
                     try:
-                        queue_data = self.data_queue.get(timeout=5)
+                        queue_data = self.data_queue.get(timeout=1)
                     except queue.Empty:
+                        # タイムアウトごとにシャットダウンフラグをチェック
                         continue
 
                     # データを解析
@@ -311,10 +354,11 @@ class SmartMeterLogger:
                         self.logger.debug(f"Unknown data from queue: {queue_data}")
 
                 except Exception as e:
-                    self.logger.error(f"データ処理エラー: {e}")
+                    if not self.shutdown_requested:
+                        self.logger.error(f"データ処理エラー: {e}")
 
         except KeyboardInterrupt:
-            self.logger.info("終了シグナル受信")
+            self.logger.info("KeyboardInterrupt受信")
         finally:
             self._cleanup()
 
@@ -322,15 +366,23 @@ class SmartMeterLogger:
         """クリーンアップ処理"""
         self.logger.info("クリーンアップ中...")
 
+        # BrouteReaderスレッドをグレースフルに停止
         if self.reader:
             try:
+                self.logger.info("BrouteReaderスレッド停止中...")
+                # stop()は内部でstopEvent.set()とjoin()を呼び出す
+                # join()はスレッドが終了するまで待機する
                 self.reader.stop()
+                self.logger.info("BrouteReaderスレッド停止完了")
             except Exception as e:
                 self.logger.error(f"Reader停止エラー: {e}")
 
+        # InfluxDBクライアントをクローズ
         if self.influx_client:
             try:
+                self.logger.info("InfluxDB接続クローズ中...")
                 self.influx_client.close()
+                self.logger.info("InfluxDB接続クローズ完了")
             except Exception as e:
                 self.logger.error(f"InfluxDB接続クローズエラー: {e}")
 

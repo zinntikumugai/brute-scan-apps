@@ -245,6 +245,70 @@ from(bucket: "power")
   |> filter(fn: (r) => r._field == "value")
 ```
 
+## デバッグモード
+
+### DEBUG環境変数を使用
+
+デバッグモードを有効にすると、すべてのログがコンソールに出力されます（keilog互換）：
+
+```bash
+# docker-compose.ymlに追加
+services:
+  smartmeter_logger:
+    environment:
+      - DEBUG=1  # デバッグモード有効
+```
+
+または、一時的に有効化：
+
+```bash
+docker compose run --rm -e DEBUG=1 smartmeter_logger
+```
+
+### ログレベルの動的切り替え
+
+実行中のコンテナのログレベルを切り替えることができます（SIGUSR1シグナル）：
+
+```bash
+# コンテナ内のプロセスIDを確認
+docker compose exec smartmeter_logger ps aux
+
+# ログレベルを切り替え（DEBUG ⇔ INFO）
+docker compose exec smartmeter_logger kill -USR1 <PID>
+```
+
+例：
+```bash
+docker compose exec smartmeter_logger kill -USR1 1
+```
+
+## グレースフルシャットダウン
+
+コンテナの再起動や停止時、データ破損を防ぐためグレースフルシャットダウンを実装しています：
+
+- BrouteReaderスレッドの安全な停止（keilog内部処理）
+- シリアルポート接続のクリーンアップ
+- InfluxDB接続のクローズ
+- 最大30秒のシャットダウン猶予期間（`stop_grace_period`）
+
+```bash
+# 安全な再起動
+docker compose restart smartmeter_logger
+
+# 安全な停止
+docker compose stop smartmeter_logger
+```
+
+ログで確認できる正常なシャットダウン手順：
+```
+INFO: SIGTERMシグナル受信 - グレースフルシャットダウン開始
+INFO: クリーンアップ中...
+INFO: BrouteReaderスレッド停止中...
+INFO: BrouteReaderスレッド停止完了
+INFO: InfluxDB接続クローズ完了
+INFO: 終了
+```
+
 ## トラブルシューティング
 
 ### サブモジュールが空の場合

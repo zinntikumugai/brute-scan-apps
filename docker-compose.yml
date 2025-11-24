@@ -18,6 +18,7 @@ services:
     image: ghcr.io/zinntikumugai/brute-scan-apps:latest
     container_name: smartmeter_logger
     restart: unless-stopped
+    stop_grace_period: 30s  # グレースフルシャットダウンに十分な時間を確保
     volumes:
       - ./config:/app/config:ro
       - ./logs:/app/logs
