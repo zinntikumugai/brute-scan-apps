@@ -1,0 +1,3 @@
+[submodule "keilog"]
+	path = keilog
+	url = https://github.com/kjmat/keilog.git

@@ -1,0 +1,41 @@
+services:
+  telegraf:
+    image: telegraf:1.28
+    container_name: smartmeter_telegraf
+    restart: unless-stopped
+    volumes:
+      - ./telegraf.conf:/etc/telegraf/telegraf.conf:ro
+      - ./logs:/app/logs:ro
+    environment:
+      - INFLUXDB_URL=${INFLUXDB_URL}
+      - INFLUXDB_TOKEN=${INFLUXDB_TOKEN}
+      - INFLUXDB_ORG=${INFLUXDB_ORG}
+      - INFLUXDB_BUCKET=${INFLUXDB_BUCKET}
+    networks:
+      - smartmeter_network
+
+  smartmeter_logger:
+    build: .
+    container_name: smartmeter_logger
+    restart: unless-stopped
+    volumes:
+      - ./config:/app/config:ro
+      - ./logs:/app/logs
+      - ./src:/app/src:ro
+      - ./keiconf_broute.py:/app/keiconf_broute.py:ro
+    devices:
+      - ${SERIAL_PORT}:/dev/wisun
+    environment:
+      - BROUTE_ID=${BROUTE_ID}
+      - BROUTE_PASSWORD=${BROUTE_PASSWORD}
+      - SERIAL_PORT=/dev/wisun
+      - INFLUXDB_URL=${INFLUXDB_URL}
+      - INFLUXDB_TOKEN=${INFLUXDB_TOKEN}
+      - INFLUXDB_ORG=${INFLUXDB_ORG}
+      - INFLUXDB_BUCKET=${INFLUXDB_BUCKET}
+    networks:
+      - smartmeter_network
+
+networks:
+  smartmeter_network:
+    driver: bridge

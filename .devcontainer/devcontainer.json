@@ -1,0 +1,60 @@
+// For format details, see https://aka.ms/devcontainer.json. For config options, see the
+// README at: https://github.com/devcontainers/templates/tree/main/src/kubernetes-helm
+{
+	"name": "Kubernetes - Local Configuration",
+	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
+	"image": "mcr.microsoft.com/devcontainers/base:bullseye",
+
+	"features": {
+		"ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
+			"enableNonRootDocker": "true",
+			"moby": "true"
+		},
+		"ghcr.io/devcontainers/features/node:1": {
+			"version": "lts"
+		},
+		"ghcr.io/anthropics/devcontainer-features/claude-code:1": {},
+		"ghcr.io/jsburckhardt/devcontainer-features/uv:1": {}
+	},
+
+	"remoteEnv": {
+		"SYNC_LOCALHOST_KUBECONFIG": "true",
+		"CLAUDE_CONFIG_DIR": "/home/vscode/.claude"
+	},
+
+	"mounts": [
+		{
+			"source": "claude-code-config-${devcontainerId}",
+			"target": "/home/vscode/.claude",
+			"type": "volume"
+		},
+		{
+			"source": "claude-code-bashhistory-${devcontainerId}",
+			"target": "/commandhistory",
+			"type": "volume"
+		},
+		"source=${localEnv:HOME}${localEnv:USERPROFILE}/.ssh,target=/home/vscode/.ssh,type=bind,readonly"
+	],
+
+	"runArgs": [
+		"--cap-add=NET_ADMIN",
+		"--cap-add=NET_RAW"
+	],
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"Anthropic.claude-code",
+				"mhutchie.git-graph",
+				"streetsidesoftware.code-spell-checker",
+				"ms-python.python",
+				"ms-python.isort",
+				"ms-python.flake8",
+				"ms-python.autopep8",
+				"mikoz.black-py",
+				"tamasfe.even-better-toml"
+			]
+		}
+	},
+
+  "postCreateCommand": "sudo install -d -o vscode -g vscode -m 700 ~/.claude && sudo chown -R vscode:vscode ~/.claude && [ -f ~/.claude/.config.json ] || echo '{}' > ~/.claude/.config.json"
+}

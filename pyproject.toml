@@ -1,0 +1,30 @@
+[project]
+name = "smartmeter-logger"
+version = "0.1.0"
+description = "Smart meter B-route data logger using RL7023 Stick-D/IPS and keilog"
+requires-python = ">=3.13"
+dependencies = [
+    "pyserial>=3.5",
+    "pyyaml>=6.0",
+    "influxdb-client>=1.36.0",
+    "python-dotenv>=1.0.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=7.0.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.black]
+line-length = 100
+target-version = ["py313"]
