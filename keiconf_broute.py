@@ -7,7 +7,7 @@ import os
 # keilogモジュールのパスを追加
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'keilog'))
 
-from keilog import WiSunRL7023, BrouteReader, BrouteProperty
+from keilib.broute import WiSunRL7023, BrouteReader
 
 
 def create_broute_reader(broute_id: str, broute_password: str, serial_port: str,
@@ -33,25 +33,25 @@ def create_broute_reader(broute_id: str, broute_password: str, serial_port: str,
         properties = ['D3', 'D7', 'E1', 'E7', 'E0', 'E3']
 
     # WiSunRL7023デバイスを初期化（RL7023 Stick-D/IPS用）
-    device = WiSunRL7023(
+    wisundev = WiSunRL7023(
         dev=serial_port,
         baud=baudrate,
         timeout=timeout,
         type=WiSunRL7023.IPS  # RL7023 Stick-D/IPS用の指定
     )
 
-    # BroutePropertyリストを構築
-    prop_list = []
-    for prop in properties:
-        prop_list.append(BrouteProperty(epc=prop))
+    # リクエストリストを構築（keilogの形式に合わせる）
+    requests = [
+        {'epc': properties, 'cycle': interval_seconds}
+    ]
 
     # BrouteReaderを初期化
     reader = BrouteReader(
-        device=device,
-        id=broute_id,
-        password=broute_password,
-        props=prop_list,
-        interval=interval_seconds
+        wisundev=wisundev,
+        broute_id=broute_id,
+        broute_pwd=broute_password,
+        requests=requests,
+        record_que=None
     )
 
     return reader

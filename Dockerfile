@@ -15,6 +15,9 @@ COPY config/ ./config/
 # Install dependencies using uv
 RUN uv pip install --system --no-cache -r pyproject.toml
 
+# Set PYTHONPATH to include keilog directory for keilib imports
+ENV PYTHONPATH="/app/keilog"
+
 # Create logs directory
 RUN mkdir -p /app/logs
 
