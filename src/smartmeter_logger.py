@@ -55,6 +55,8 @@ class SmartMeterLogger:
 
         # Data aggregation buffer
         self.current_data = {}
+        self.last_write_time = None
+        self.aggregation_interval = 30  # seconds
 
     def _load_config(self, config_path: str) -> Dict[str, Any]:
         """設定ファイルを読み込む"""
@@ -167,44 +169,62 @@ class SmartMeterLogger:
         filename = datetime.now().strftime(self.config['csv']['filename_format'])
         return output_dir / filename
 
-    def _write_to_csv(self, data: Dict[str, Any]) -> None:
-        """CSVファイルに書き込み"""
-        if not self.config['csv']['enabled']:
+    def _should_write_aggregated_data(self) -> bool:
+        """集約データを書き込むべきか判定"""
+        if not self.last_write_time:
+            return False
+
+        elapsed = (datetime.now() - self.last_write_time).total_seconds()
+        return elapsed >= self.aggregation_interval
+
+    def _flush_aggregated_data(self) -> None:
+        """集約したデータをCSVとInfluxDBに書き込み"""
+        if not self.current_data:
             return
 
-        csv_file = self._get_csv_filepath()
-        file_exists = csv_file.exists()
+        # CSVに書き込み
+        if self.config['csv']['enabled']:
+            csv_file = self._get_csv_filepath()
+            file_exists = csv_file.exists()
 
-        # 固定されたフィールド名（すべての可能なカラム）
-        fieldnames = [
-            'timestamp',
-            'instant_power_w',
-            'energy_total_kwh',
-            'energy_reverse_kwh',
-            'coefficient',
-            'unit',
-            'effective_digits',
-            'instant_current_r',
-            'instant_current_t'
-        ]
+            # 固定されたフィールド名（すべての可能なカラム）
+            fieldnames = [
+                'timestamp',
+                'instant_power_w',
+                'energy_total_kwh',
+                'energy_reverse_kwh',
+                'coefficient',
+                'unit',
+                'effective_digits',
+                'instant_current_r',
+                'instant_current_t'
+            ]
 
-        try:
-            with open(csv_file, 'a', newline='', encoding='utf-8') as f:
-                writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
+            try:
+                with open(csv_file, 'a', newline='', encoding='utf-8') as f:
+                    writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
 
-                # ヘッダーを書き込み（ファイルが新規の場合）
-                if not file_exists:
-                    writer.writeheader()
+                    # ヘッダーを書き込み（ファイルが新規の場合）
+                    if not file_exists:
+                        writer.writeheader()
 
-                # データ行を書き込み（欠損値は空）
-                row = {'timestamp': datetime.now().isoformat()}
-                row.update(data)
-                writer.writerow(row)
+                    # 集約データ行を書き込み
+                    row = {'timestamp': datetime.now().isoformat()}
+                    row.update(self.current_data)
+                    writer.writerow(row)
 
-            self.logger.debug(f"CSVに書き込み: {csv_file}")
+                self.logger.info(f"CSV書き込み: {self.current_data}")
 
-        except Exception as e:
-            self.logger.error(f"CSV書き込みエラー: {e}")
+            except Exception as e:
+                self.logger.error(f"CSV書き込みエラー: {e}")
+
+        # InfluxDBに書き込み
+        if self.config['influxdb']['enabled']:
+            self._write_to_influxdb(self.current_data)
+
+        # バッファをクリア
+        self.current_data = {}
+        self.last_write_time = datetime.now()
 
     def _write_to_influxdb(self, data: Dict[str, Any]) -> None:
         """InfluxDBに書き込み"""
@@ -311,6 +331,7 @@ class SmartMeterLogger:
             sys.exit(1)
 
         self.logger.info("データ取得開始")
+        self.last_write_time = datetime.now()
 
         try:
             while True:
@@ -319,19 +340,23 @@ class SmartMeterLogger:
                     try:
                         queue_data = self.data_queue.get(timeout=5)
                     except queue.Empty:
+                        # タイムアウト時、集約データがあれば書き込む
+                        if self._should_write_aggregated_data():
+                            self._flush_aggregated_data()
                         continue
 
                     # データを解析
                     parsed_data = self._parse_queue_data(queue_data)
 
                     if parsed_data:
-                        self.logger.info(f"データ取得: {parsed_data}")
+                        self.logger.debug(f"データ取得: {parsed_data}")
 
-                        # CSVに書き込み
-                        self._write_to_csv(parsed_data)
+                        # 集約バッファに追加
+                        self.current_data.update(parsed_data)
 
-                        # InfluxDBに書き込み（有効な場合）
-                        self._write_to_influxdb(parsed_data)
+                        # 一定時間経過したら書き込み
+                        if self._should_write_aggregated_data():
+                            self._flush_aggregated_data()
                     else:
                         self.logger.debug(f"Unknown data from queue: {queue_data}")
 
