@@ -1,3 +1,6 @@
+# ユニットID（メーター識別用）
+unit_id: "smartmeter01"
+
 # Bルート認証情報（環境変数で上書き可能）
 broute:
   id: ""  # BROUTE_ID 環境変数で設定

@@ -209,11 +209,20 @@ logs/YYYYMMDD-smartmeter.csv
 docker compose exec smartmeter_logger tail /app/logs/*.csv
 ```
 
-CSVフォーマット例：
+CSVフォーマット例（Long Format - 1行1プロパティ）：
 ```csv
-timestamp,instant_power_w,energy_total_kwh,energy_reverse_kwh,coefficient,unit,effective_digits
-2025-11-24T12:00:00.123456,1234,5678.9,0.0,1,1,6
+timestamp,unitid,epc,dataid,value
+2025-11-24T12:00:00.123456,smartmeter01,E7,,1234
+2025-11-24T12:00:00.234567,smartmeter01,E0,,5678.9
+2025-11-24T12:00:00.345678,smartmeter01,D3,,1
 ```
+
+各プロパティが個別の行として記録されます：
+- `timestamp`: データ取得時刻（ISO8601形式）
+- `unitid`: メーター識別ID（config/settings.ymlで設定）
+- `epc`: EPCコード（E7=瞬時電力, E0=積算電力量など）
+- `dataid`: データID（通常は空、将来の拡張用）
+- `value`: 測定値
 
 ### InfluxDBでの確認
 
@@ -232,7 +241,8 @@ influx query 'from(bucket: "power")
 from(bucket: "power")
   |> range(start: -1h)
   |> filter(fn: (r) => r._measurement == "smartmeter_power")
-  |> filter(fn: (r) => r._field == "instant_power_w")
+  |> filter(fn: (r) => r.epc == "E7")  # 瞬時電力のみ
+  |> filter(fn: (r) => r._field == "value")
 ```
 
 ## トラブルシューティング
