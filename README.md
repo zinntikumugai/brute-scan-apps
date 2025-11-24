@@ -40,7 +40,7 @@ RL7023 Stick-D/IPS + keilog を使用してスマートメーターからBルー
 
 ```bash
 # リポジトリをクローン
-git clone <your-repo-url>
+git clone https://github.com/zinntikumugai/brute-scan-apps.git
 cd brute-scan-apps
 
 # サブモジュール（keilog）を初期化・取得
@@ -51,7 +51,7 @@ git submodule update
 または、一度にクローン：
 
 ```bash
-git clone --recursive <your-repo-url>
+git clone --recursive https://github.com/zinntikumugai/brute-scan-apps.git
 cd brute-scan-apps
 ```
 
