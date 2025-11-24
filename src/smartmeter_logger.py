@@ -8,6 +8,7 @@ import sys
 import time
 import csv
 import logging
+import queue
 from datetime import datetime
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
@@ -48,8 +49,9 @@ class SmartMeterLogger:
         self.influx_client = None
         self.write_api = None
 
-        # BrouteReader
+        # BrouteReader and data queue
         self.reader = None
+        self.data_queue = queue.Queue(50)
 
     def _load_config(self, config_path: str) -> Dict[str, Any]:
         """設定ファイルを読み込む"""
@@ -139,7 +141,8 @@ class SmartMeterLogger:
                 baudrate=self.config['serial']['baudrate'],
                 timeout=self.config['serial']['timeout'],
                 properties=self.config['acquisition']['properties'],
-                interval_seconds=self.config['acquisition']['interval_seconds']
+                interval_seconds=self.config['acquisition']['interval_seconds'],
+                record_queue=self.data_queue
             )
 
             if initialize_and_connect(self.reader):
@@ -221,47 +224,64 @@ class SmartMeterLogger:
         except Exception as e:
             self.logger.error(f"InfluxDB書き込みエラー: {e}")
 
-    def _parse_meter_data(self, raw_data: Dict[str, Any]) -> Dict[str, Any]:
+    def _parse_queue_data(self, queue_data: list) -> Optional[Dict[str, Any]]:
         """
-        メーターから取得した生データを解析して整形
+        Queueから取得したデータを解析して整形
 
         Args:
-            raw_data: keilogから取得した生データ
+            queue_data: ['BR', epc, value, status] 形式のデータ
 
         Returns:
-            整形されたデータ辞書
+            整形されたデータ辞書、またはNone
         """
+        if not queue_data or len(queue_data) < 3:
+            return None
+
+        source, epc, value, *rest = queue_data
+
+        if source != 'BR':
+            return None
+
         parsed = {}
 
         try:
             # 瞬時電力 (E7) - W単位
-            if 'E7' in raw_data:
-                parsed['instant_power_w'] = int(raw_data['E7'])
+            if epc == 'E7':
+                parsed['instant_power_w'] = int(value)
 
-            # 積算電力量（正方向）(E0) - kWh単位に変換
-            if 'E0' in raw_data:
-                parsed['energy_total_kwh'] = float(raw_data['E0']) / 1000.0
+            # 積算電力量（正方向）(E0)
+            elif epc == 'E0':
+                parsed['energy_total_kwh'] = float(value)
 
-            # 積算電力量（逆方向）(E3) - kWh単位に変換
-            if 'E3' in raw_data:
-                parsed['energy_reverse_kwh'] = float(raw_data['E3']) / 1000.0
+            # 積算電力量（逆方向）(E3)
+            elif epc == 'E3':
+                parsed['energy_reverse_kwh'] = float(value)
 
             # 係数 (D3)
-            if 'D3' in raw_data:
-                parsed['coefficient'] = int(raw_data['D3'])
+            elif epc == 'D3':
+                parsed['coefficient'] = int(value)
 
-            # 積算電力量単位 (D7)
-            if 'D7' in raw_data:
-                parsed['unit'] = int(raw_data['D7'])
+            # 積算電力量有効桁数 (D7)
+            elif epc == 'D7':
+                parsed['effective_digits'] = int(value)
 
-            # 積算電力量有効桁数 (E1)
-            if 'E1' in raw_data:
-                parsed['effective_digits'] = int(raw_data['E1'])
+            # 積算電力量単位 (E1)
+            elif epc == 'E1':
+                parsed['unit'] = int(value)
+
+            # 瞬時電流 R相 (E8R)
+            elif epc == 'E8R':
+                parsed['instant_current_r'] = float(value)
+
+            # 瞬時電流 T相 (E8T)
+            elif epc == 'E8T':
+                parsed['instant_current_t'] = float(value)
 
         except Exception as e:
-            self.logger.error(f"データ解析エラー: {e}")
+            self.logger.error(f"データ解析エラー: {e}, data={queue_data}")
+            return None
 
-        return parsed
+        return parsed if parsed else None
 
     def run(self) -> None:
         """メインループ"""
@@ -280,31 +300,28 @@ class SmartMeterLogger:
         try:
             while True:
                 try:
-                    # データを取得（keilogのreadメソッド）
-                    raw_data = self.reader.read()
+                    # Queueからデータを取得（タイムアウト付き）
+                    try:
+                        queue_data = self.data_queue.get(timeout=5)
+                    except queue.Empty:
+                        continue
 
-                    if raw_data:
-                        # データを解析
-                        parsed_data = self._parse_meter_data(raw_data)
+                    # データを解析
+                    parsed_data = self._parse_queue_data(queue_data)
 
-                        if parsed_data:
-                            self.logger.info(f"データ取得: {parsed_data}")
+                    if parsed_data:
+                        self.logger.info(f"データ取得: {parsed_data}")
 
-                            # CSVに書き込み
-                            self._write_to_csv(parsed_data)
+                        # CSVに書き込み
+                        self._write_to_csv(parsed_data)
 
-                            # InfluxDBに書き込み（有効な場合）
-                            self._write_to_influxdb(parsed_data)
-                        else:
-                            self.logger.warning("データ解析結果が空です")
+                        # InfluxDBに書き込み（有効な場合）
+                        self._write_to_influxdb(parsed_data)
                     else:
-                        self.logger.warning("データ取得失敗")
+                        self.logger.debug(f"Unknown data from queue: {queue_data}")
 
                 except Exception as e:
                     self.logger.error(f"データ処理エラー: {e}")
-
-                # 次の取得まで待機
-                time.sleep(self.config['acquisition']['interval_seconds'])
 
         except KeyboardInterrupt:
             self.logger.info("終了シグナル受信")

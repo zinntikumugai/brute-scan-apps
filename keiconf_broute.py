@@ -12,7 +12,8 @@ from keilib.broute import WiSunRL7023, BrouteReader
 
 def create_broute_reader(broute_id: str, broute_password: str, serial_port: str,
                         baudrate: int = 115200, timeout: int = 30,
-                        properties: list = None, interval_seconds: int = 30) -> BrouteReader:
+                        properties: list = None, interval_seconds: int = 30,
+                        record_queue = None) -> BrouteReader:
     """
     BrouteReaderインスタンスを作成する
 
@@ -21,9 +22,10 @@ def create_broute_reader(broute_id: str, broute_password: str, serial_port: str,
         broute_password: Bルートパスワード
         serial_port: シリアルポート（例: /dev/ttyUSB0）
         baudrate: ボーレート（デフォルト: 115200）
-        timeout: タイムアウト秒数（デフォルト: 30）
+        timeout: タイムアウト秒数（デフォルト: 30）※現在未使用
         properties: 取得するプロパティのリスト（デフォルト: D3,D7,E1,E7,E0,E3）
         interval_seconds: 取得間隔秒数（デフォルト: 30）
+        record_queue: データを受け取るQueue（Noneの場合、データは破棄される）
 
     Returns:
         BrouteReaderインスタンス
@@ -50,7 +52,7 @@ def create_broute_reader(broute_id: str, broute_password: str, serial_port: str,
         broute_id=broute_id,
         broute_pwd=broute_password,
         requests=requests,
-        record_que=None
+        record_que=record_queue
     )
 
     return reader
