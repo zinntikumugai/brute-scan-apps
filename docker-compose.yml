@@ -21,8 +21,6 @@ services:
     volumes:
       - ./config:/app/config:ro
       - ./logs:/app/logs
-      - ./src:/app/src:ro
-      - ./keiconf_broute.py:/app/keiconf_broute.py:ro
     devices:
       - ${SERIAL_PORT}:/dev/wisun
     environment:
