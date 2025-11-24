@@ -1,6 +1,6 @@
 services:
   telegraf:
-    image: telegraf:1.28
+    image: telegraf:1.35
     container_name: smartmeter_telegraf
     restart: unless-stopped
     volumes:
