@@ -10,6 +10,9 @@
 services:
   smartmeter_logger:
     devices:
-      - ${SERIAL_DEVICE}:/dev/wisun
+      # **:? で必須にする。** 未設定だと compose は警告 1 行で `:/dev/wisun` を
+      # 黙って捨て、デバイスの無いコンテナが起動してしまう（旧 .env から
+      # 移行したときにこれを踏む。SERIAL_PORT の意味が変わったため）。
+      - ${SERIAL_DEVICE:?SERIAL_DEVICE にホスト側の RL7023 のパスを設定する}:/dev/wisun
     environment:
       - SERIAL_PORT=/dev/wisun

@@ -16,6 +16,30 @@ RL7023 の繋ぎ方が 2 通りあり、**同じコード・同じイメージ**
 > compose の `devices` は override で追加はできても削除できないため、
 > devices 無しを既定にして USB 構成で足す向きにしています。
 
+### 既存の USB 構成からの移行
+
+**`.env` の `SERIAL_PORT` の意味が変わりました。** 以前は「ホスト側のデバイスパス」で、
+コンテナ内では `/dev/wisun` 固定でした。いまは「アプリが開く先」そのもので、
+ホスト側のパスは `SERIAL_DEVICE` に分かれています。
+
+```diff
+-SERIAL_PORT=/dev/serial/by-id/usb-ROHM_BP35A1_XXXXXXXX-if00
++SERIAL_PORT=/dev/wisun
++SERIAL_DEVICE=/dev/serial/by-id/usb-ROHM_BP35A1_XXXXXXXX-if00
+```
+
+更新手順（USB 構成のホストで）:
+
+```bash
+git pull                       # compose ファイル自体が変わっているので image だけでは足りない
+vi .env                        # 上の 2 行に直す
+docker compose pull
+docker compose -f docker-compose.yml -f docker-compose.usb.yml up -d
+```
+
+`SERIAL_DEVICE` を書き忘れた場合は `required variable SERIAL_DEVICE is missing a value`
+で**起動せずに止まります**（デバイスの無いコンテナが黙って上がらないように `:?` を付けてある）。
+
 remote 構成では、ESP32 ブリッジ側（WiSUN-ESP32-relay）の compose を先に起動して
 `smartmeter_network` を作っておきます。logger はそのネットワークに参加し、
 `socket://bridge:7001` で離れた RL7023 と話します。
