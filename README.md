@@ -2,6 +2,56 @@
 
 RL7023 Stick-D/IPS + keilog を使用してスマートメーターからBルートデータを取得し、InfluxDB v2に保存するシステムです。
 
+## 2 つの接続構成
+
+RL7023 の繋ぎ方が 2 通りあり、**同じコード・同じイメージ**でどちらでも動きます。
+切り替えるのは `.env` の `SERIAL_PORT` と、重ねる compose ファイルだけです。
+
+| 構成 | SERIAL_PORT | 起動コマンド |
+|---|---|---|
+| **ローカル USB**（このホストに RL7023 を直挿し） | `/dev/wisun` | `docker compose -f docker-compose.yml -f docker-compose.usb.yml up -d` |
+| **remote**（ESP32 ブリッジ経由で離れた場所の RL7023 を使う） | `socket://bridge:7001` | `docker compose -f docker-compose.yml -f docker-compose.remote.yml up -d` |
+
+> **USB 構成でもコマンドが変わりました。** `docker-compose.usb.yml` を重ねてください。
+> compose の `devices` は override で追加はできても削除できないため、
+> devices 無しを既定にして USB 構成で足す向きにしています。
+
+### 既存の USB 構成からの移行
+
+**`.env` の `SERIAL_PORT` の意味が変わりました。** 以前は「ホスト側のデバイスパス」で、
+コンテナ内では `/dev/wisun` 固定でした。いまは「アプリが開く先」そのもので、
+ホスト側のパスは `SERIAL_DEVICE` に分かれています。
+
+```diff
+-SERIAL_PORT=/dev/serial/by-id/usb-ROHM_BP35A1_XXXXXXXX-if00
++SERIAL_PORT=/dev/wisun
++SERIAL_DEVICE=/dev/serial/by-id/usb-ROHM_BP35A1_XXXXXXXX-if00
+```
+
+更新手順（USB 構成のホストで）:
+
+```bash
+git pull                       # compose ファイル自体が変わっているので image だけでは足りない
+vi .env                        # 上の 2 行に直す
+docker compose pull
+docker compose -f docker-compose.yml -f docker-compose.usb.yml up -d
+```
+
+`SERIAL_DEVICE` を書き忘れた場合は `required variable SERIAL_DEVICE is missing a value`
+で**起動せずに止まります**（デバイスの無いコンテナが黙って上がらないように `:?` を付けてある）。
+
+remote 構成では、ESP32 ブリッジ側（WiSUN-ESP32-relay）の compose を先に起動して
+`smartmeter_network` を作っておきます。logger はそのネットワークに参加し、
+`socket://bridge:7001` で離れた RL7023 と話します。
+
+```
+smartmeter_logger ──socket://bridge:7001──> bridge (Go) ──TLS──> ESP32 ──USB──> RL7023
+```
+
+**keilog（サブモジュール）は 1 行も変えていません**（`127d414` のまま）。
+`socket://` 対応は `keiconf_broute.py` の `RemoteWiSunRL7023` が
+`open()` だけを `serial.serial_for_url()` に差し替えて実現しています。
+
 ## 構成
 
 - **smartmeter_logger**: Pythonアプリケーション（スマートメーターからデータ取得）
@@ -80,8 +130,12 @@ cp .env.example .env
 BROUTE_ID=your_broute_id_here
 BROUTE_PASSWORD=your_broute_password_here
 
-# シリアルポート
-SERIAL_PORT=/dev/serial/by-id/usb-ROHM_BP35A1_XXXXXXXX-if00
+# シリアルポート（下の 2 通りのどちらか）
+#  ローカル USB 構成: コンテナ内のパスを書く。実デバイスは SERIAL_DEVICE
+SERIAL_PORT=/dev/wisun
+SERIAL_DEVICE=/dev/serial/by-id/usb-ROHM_BP35A1_XXXXXXXX-if00
+#  remote 構成（ESP32 ブリッジ経由）: SERIAL_DEVICE は不要
+# SERIAL_PORT=socket://bridge:7001
 
 # InfluxDB v2設定
 INFLUXDB_URL=http://your-influxdb-host:8086
@@ -129,13 +183,41 @@ influx auth create \
 
 ### Docker Composeで起動
 
+**構成に応じて重ねるファイルが変わります**（上の「2 つの接続構成」を参照）。
+
 ```bash
-# ビルドと起動
-docker compose up -d --build
+# ローカル USB 構成
+docker compose -f docker-compose.yml -f docker-compose.usb.yml up -d --build
+
+# remote 構成（ESP32 ブリッジ経由。先にブリッジ側の compose を起動しておく）
+docker compose -f docker-compose.yml -f docker-compose.remote.yml up -d --build
 
 # ログを確認
 docker compose logs -f smartmeter_logger
 docker compose logs -f telegraf
+```
+
+### reader スレッドの自動復旧
+
+TCP 切断や USB 抜けが起きると keilog の reader スレッドだけが終了し、
+**プロセスは生きたままデータが止まります**（Docker の restart policy も効きません）。
+`smartmeter_logger.py` は毎秒 reader の生死を見て、死んでいたら
+古いソケットを閉じ、受信キューを捨ててから作り直します
+（1 → 2 → 4 … 最大 60 秒のバックオフ）。ログにはこう出ます:
+
+```
+ERROR - BrouteReaderスレッドが停止している。再生成する (通算 N 回目)
+INFO  - BrouteReaderを再生成した
+```
+
+この行が延々と増え続ける場合は、接続先（USB デバイスかブリッジ）が落ちています。
+
+### テスト
+
+実機もブリッジも要らないテストがあります。
+
+```bash
+uv run --with pytest --with pyserial pytest tests/
 ```
 
 ### 初回起動時の注意

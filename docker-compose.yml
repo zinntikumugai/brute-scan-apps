@@ -22,12 +22,16 @@ services:
     volumes:
       - ./config:/app/config:ro
       - ./logs:/app/logs
-    devices:
-      - ${SERIAL_PORT}:/dev/wisun
+    # devices マッピングはここには書かない。
+    # ローカル USB 構成でだけ docker-compose.usb.yml が足す
+    # （compose の list は override で**追加はできるが削除はできない**ため、
+    #   remote 構成を既定にして USB 構成を重ねる向きにしている）。
     environment:
       - BROUTE_ID=${BROUTE_ID}
       - BROUTE_PASSWORD=${BROUTE_PASSWORD}
-      - SERIAL_PORT=/dev/wisun
+      # socket://bridge:7001（ESP32 ブリッジ経由）か /dev/wisun（ローカル USB）。
+      # .env で切り替える。USB の場合は docker-compose.usb.yml も重ねる
+      - SERIAL_PORT=${SERIAL_PORT}
       - INFLUXDB_URL=${INFLUXDB_URL}
       - INFLUXDB_TOKEN=${INFLUXDB_TOKEN}
       - INFLUXDB_ORG=${INFLUXDB_ORG}
@@ -37,4 +41,11 @@ services:
 
 networks:
   smartmeter_network:
-    driver: bridge
+    # **名前を固定する。** ESP32 ブリッジ側の compose
+    # (WiSUN-ESP32-relay/deploy/compose.yml) が同じ名前のネットワークに入り、
+    # logger から socket://bridge:7001 で届くようにするため。
+    name: smartmeter_network
+    # **driver は書かない。** 既定が bridge なのに書いておくと、
+    # docker-compose.remote.yml が external: true にしたときに
+    # 「external なのに追加の属性がある」として弾く Compose がある
+    # （v2.20 ではマージ結果から落ちるが、版に依存させない）。

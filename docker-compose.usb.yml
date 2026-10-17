@@ -1,0 +1,21 @@
+# ローカル USB 構成の上乗せ（RL7023 をこのホストに直挿しする場合）。
+#
+#   docker compose -f docker-compose.yml -f docker-compose.usb.yml up -d
+#
+# .env には SERIAL_DEVICE にホスト側の実パスを書く:
+#   SERIAL_DEVICE=/dev/serial/by-id/usb-ROHM_BP35A1_XXXXXXXX-if00
+#
+# ESP32 ブリッジ経由（remote 構成）ではこのファイルを使わず、
+# SERIAL_PORT=socket://bridge:7001 にして remote 用を重ねる:
+#   docker compose -f docker-compose.yml -f docker-compose.remote.yml up -d
+# 重ねないとベース側が smartmeter_network を自プロジェクトのものとして扱い、
+# ブリッジ側が先に作った同名ネットワークと所有者が食い違う。
+services:
+  smartmeter_logger:
+    devices:
+      # **:? で必須にする。** 未設定だと compose は警告 1 行で `:/dev/wisun` を
+      # 黙って捨て、デバイスの無いコンテナが起動してしまう（旧 .env から
+      # 移行したときにこれを踏む。SERIAL_PORT の意味が変わったため）。
+      - ${SERIAL_DEVICE:?SERIAL_DEVICE にホスト側の RL7023 のパスを設定する}:/dev/wisun
+    environment:
+      - SERIAL_PORT=/dev/wisun

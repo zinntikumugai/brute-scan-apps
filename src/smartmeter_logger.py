@@ -35,6 +35,9 @@ except ImportError:
 class SmartMeterLogger:
     """スマートメーターデータロガー"""
 
+    # reader がこれだけ生き続けたら安定したとみなし、バックオフを戻す（秒）
+    READER_STABLE_SEC = 30.0
+
     def __init__(self, config_path: str = '/app/config/settings.yml'):
         """初期化"""
         # 環境変数を読み込み
@@ -53,6 +56,12 @@ class SmartMeterLogger:
         # BrouteReader and data queue
         self.reader = None
         self.data_queue = queue.Queue(50)
+
+        # reader スレッド復旧用（_supervise_reader）
+        self.reader_restarts = 0
+        self._reader_retry_delay = 1.0   # 秒。作り直すたび倍にして最大 60
+        self._reader_retry_at = 0.0      # time.monotonic() の時刻
+        self._reader_started_at = 0.0    # 最後に reader を作った時刻
 
         # Unit ID for tagging
         self.unit_id = self.config.get('unit_id', 'smartmeter01')
@@ -179,6 +188,79 @@ class SmartMeterLogger:
         except Exception as e:
             self.logger.error(f"BrouteReader初期化エラー: {e}")
             return False
+
+    def _drain_queue(self) -> int:
+        """受信キューを空にする。捨てた件数を返す。
+
+        **新しい reader に古い計測値を混ぜないため**（実装指示 §8）。
+        切断前に積まれた値は、復旧後の時刻で記録すると嘘になる。
+        """
+        dropped = 0
+        while True:
+            try:
+                self.data_queue.get_nowait()
+            except queue.Empty:
+                return dropped
+            dropped += 1
+
+    def _supervise_reader(self) -> None:
+        """reader スレッドが死んでいたら作り直す。
+
+        **keilog の BrouteReader.run() にはループ全体を包む try/except が無い**
+        （keilib/broute.py）。TCP 切断や USB 抜けで例外が出るとスレッドだけが
+        静かに終わり、プロセスは生きたままデータが永久に止まる。
+        Docker の restart policy も効かない（プロセスが落ちていないため）。
+
+        判定材料は **スレッドが生きているかどうかだけ**にする。無通信時間では
+        判定しない: スキャン中など計測値がまだ来ない正常状態を障害と誤判定する。
+        無通信の監視は keilog 側の 600 秒 watchdog に任せる。
+        """
+        now = time.monotonic()
+        if self.reader is not None and self.reader.is_alive():
+            # **しばらく生きていて初めて「落ち着いた」とみなす。**
+            # 作った直後は生きているので、ここで即リセットすると
+            # 「作る → すぐ死ぬ」を毎秒繰り返してバックオフが効かない
+            if now - self._reader_started_at >= self.READER_STABLE_SEC:
+                self._reader_retry_delay = 1.0
+            return
+
+        if now < self._reader_retry_at:
+            return
+
+        self.reader_restarts += 1
+        self.logger.error(
+            f"BrouteReaderスレッドが停止している。再生成する "
+            f"(通算 {self.reader_restarts} 回目)")
+
+        # 古い reader とソケットを確実に手放す
+        old = self.reader
+        self.reader = None
+        if old is not None:
+            try:
+                old.stop()          # stopEvent をセットして join（死んでいれば即返る）
+            except Exception as e:
+                self.logger.debug(f"旧readerのstopで例外: {e}")
+            try:
+                old.wisundev.close()
+            except Exception as e:
+                self.logger.debug(f"旧デバイスのcloseで例外: {e}")
+
+        dropped = self._drain_queue()
+        if dropped:
+            self.logger.warning(f"復旧前のキューを破棄した: {dropped} 件")
+
+        if self._init_broute_reader():
+            self.logger.info("BrouteReaderを再生成した")
+        else:
+            self.logger.error("BrouteReaderの再生成に失敗")
+
+        # **成功しても次の試行までは間を空ける。**
+        # initialize_and_connect() は start() が返れば成功だが、接続先が
+        # 落ちていると open() の中でスレッドが即死する。成功だけを見て
+        # バックオフを戻すと毎秒作り直して回り続ける（実機で踏んだ）。
+        self._reader_started_at = now
+        self._reader_retry_at = now + self._reader_retry_delay
+        self._reader_retry_delay = min(self._reader_retry_delay * 2, 60.0)
 
     def _get_csv_filepath(self) -> Path:
         """CSV出力ファイルパスを取得"""
@@ -323,12 +405,17 @@ class SmartMeterLogger:
         if not self._init_broute_reader():
             self.logger.error("初期化失敗。終了します。")
             sys.exit(1)
+        self._reader_started_at = time.monotonic()
 
         self.logger.info("データ取得開始")
 
         try:
             while not self.shutdown_requested:
                 try:
+                    # **毎周 reader の生死を見る。**死んでいたら作り直す。
+                    # ここが無いと、スレッドだけ死んでプロセスは生き続ける
+                    self._supervise_reader()
+
                     # Queueからデータを取得（タイムアウト付き）
                     try:
                         queue_data = self.data_queue.get(timeout=1)
