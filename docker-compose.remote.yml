@@ -1,0 +1,17 @@
+# ESP32 ブリッジ経由（remote 構成）の上乗せ。
+#
+#   docker compose -f docker-compose.yml -f docker-compose.remote.yml up -d
+#
+# .env には SERIAL_PORT=socket://bridge:7001 を書く。
+#
+# ネットワークはブリッジ側の compose（WiSUN-ESP32-relay/deploy/compose.yml）が
+# 作る smartmeter_network に**参加する**ので external にする。
+# 先にブリッジ側を上げておくこと:
+#   cd <WiSUN-ESP32-relay>/deploy && docker compose up -d
+#
+# こうしないと「同名のネットワークが既にあるが、このプロジェクトが作ったものではない」
+# という警告が毎回出る（動きはするが、どちらが所有者か曖昧になる）。
+networks:
+  smartmeter_network:
+    external: true
+    name: smartmeter_network

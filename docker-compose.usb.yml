@@ -1,0 +1,15 @@
+# ローカル USB 構成の上乗せ（RL7023 をこのホストに直挿しする場合）。
+#
+#   docker compose -f docker-compose.yml -f docker-compose.usb.yml up -d
+#
+# .env には SERIAL_DEVICE にホスト側の実パスを書く:
+#   SERIAL_DEVICE=/dev/serial/by-id/usb-ROHM_BP35A1_XXXXXXXX-if00
+#
+# ESP32 ブリッジ経由（remote 構成）ではこのファイルを使わない。
+# SERIAL_PORT=socket://bridge:7001 にして `docker compose up -d` だけでよい。
+services:
+  smartmeter_logger:
+    devices:
+      - ${SERIAL_DEVICE}:/dev/wisun
+    environment:
+      - SERIAL_PORT=/dev/wisun
