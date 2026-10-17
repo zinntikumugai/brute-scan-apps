@@ -45,4 +45,7 @@ networks:
     # (WiSUN-ESP32-relay/deploy/compose.yml) が同じ名前のネットワークに入り、
     # logger から socket://bridge:7001 で届くようにするため。
     name: smartmeter_network
-    driver: bridge
+    # **driver は書かない。** 既定が bridge なのに書いておくと、
+    # docker-compose.remote.yml が external: true にしたときに
+    # 「external なのに追加の属性がある」として弾く Compose がある
+    # （v2.20 ではマージ結果から落ちるが、版に依存させない）。

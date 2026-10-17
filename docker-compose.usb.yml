@@ -5,8 +5,11 @@
 # .env には SERIAL_DEVICE にホスト側の実パスを書く:
 #   SERIAL_DEVICE=/dev/serial/by-id/usb-ROHM_BP35A1_XXXXXXXX-if00
 #
-# ESP32 ブリッジ経由（remote 構成）ではこのファイルを使わない。
-# SERIAL_PORT=socket://bridge:7001 にして `docker compose up -d` だけでよい。
+# ESP32 ブリッジ経由（remote 構成）ではこのファイルを使わず、
+# SERIAL_PORT=socket://bridge:7001 にして remote 用を重ねる:
+#   docker compose -f docker-compose.yml -f docker-compose.remote.yml up -d
+# 重ねないとベース側が smartmeter_network を自プロジェクトのものとして扱い、
+# ブリッジ側が先に作った同名ネットワークと所有者が食い違う。
 services:
   smartmeter_logger:
     devices:

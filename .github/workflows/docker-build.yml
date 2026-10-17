@@ -50,16 +50,17 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          # type=sha の prefix: pull_request では {{branch}} が空になり
-          # :-<sha> という不正なタグになってビルドごと失敗する。PR には
-          # type=ref,event=pr の pr-N が付くので sha タグは要らない。
+          # type=sha の prefix: {{branch}} は **pull_request でもタグ push でも
+          # 空になる**ので、:-<sha> という不正なタグになりビルドごと失敗する。
+          # ブランチ push のときだけ有効にする（PR には type=ref,event=pr の
+          # pr-N、タグには type=semver が付くので sha タグは要らない）。
           tags: |
             type=ref,event=branch
             type=ref,event=pr
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            type=sha,prefix={{branch}}-,enable=${{ github.event_name != 'pull_request' }}
+            type=sha,prefix={{branch}}-,enable=${{ github.event_name != 'pull_request' && github.ref_type == 'branch' }}
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push Docker image
